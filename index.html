@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>For my lovelove</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        #launcher {
+            position: absolute; inset: 0; background: radial-gradient(circle, #1a001a 0%, #000 100%);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 9999; color: white; transition: opacity 0.8s ease; pointer-events: all;
+        }
+        .ignite-btn {
+            background: #ff00ff; color: white; border: none; padding: 20px 60px;
+            border-radius: 50px; font-size: 2rem; font-weight: bold; cursor: pointer;
+            box-shadow: 0 0 30px rgba(255, 0, 255, 0.8); z-index: 10000;
+        }
+        #question-text { margin-top: 25px; color: #ff69b4; font-size: 1.4rem; }
+        #v-container {
+            position: absolute; bottom: 20px; right: 20px; width: 140px; height: 100px;
+            border-radius: 12px; border: 2px solid #ff00ff; overflow: hidden; transform: scaleX(-1);
+            z-index: 5; background: #111;
+        }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        #shape-label {
+            position: absolute; width: 100%; bottom: 10%; text-align: center;
+            color: #ff69b4; font-size: 1.2rem; font-weight: bold; 
+            text-transform: uppercase; letter-spacing: 3px; opacity: 0.8; z-index: 10;
+        }
+    </style>
+</head>
+<body>
+
+<div id="launcher">
+    <button class="ignite-btn" onclick="ignite()">Yes</button>
+    <p id="question-text">Do you love me po ba?</p>
+</div>
+
+<div id="shape-label">Galaxy</div>
+<div id="v-container"><video id="webcam" autoplay playsinline muted></video></div>
+<audio id="bg-music" loop playsinline><source src="music.mp3" type="audio/mpeg"></audio>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+/** 1. SCENE SETUP **/
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.z = 15;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+
+/** 2. PARTICLES **/
+const particleCount = 15000;
+const geometry = new THREE.BufferGeometry();
+const originalPos = new Float32Array(particleCount * 3);
+const colors = new Float32Array(particleCount * 3);
+const points = new THREE.Points(geometry, new THREE.PointsMaterial({ size: 0.08, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending }));
+scene.add(points);
+
+const myPhotoFiles = Array.from({length: 43}, (_, i) => `${i + 1}.jpg`);
+const shapes = ['galaxy', 'heart', 'star', 'text_love', 'ring'];
+let currentShapeIndex = 0;
+let myTextures = [], isHandOpen = false, fallingMeshes = [];
+let targetCamPos = new THREE.Vector3(0, 0, 15), handWorldPos = new THREE.Vector3(0,0,0);
+let zoomFactor = 1;
+
+const textureLoader = new THREE.TextureLoader();
+myPhotoFiles.forEach(file => textureLoader.load(file, tex => myTextures.push(tex)));
+
+function getTextPoints(text) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 400; canvas.height = 100;
+    ctx.fillStyle = 'white'; ctx.font = 'bold 36px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(text, 200, 60);
+    const data = ctx.getImageData(0, 0, 400, 100).data;
+    const pts = [];
+    for (let y = 0; y < 100; y += 2) {
+        for (let x = 0; x < 400; x += 2) {
+            if (data[(y * 400 + x) * 4] > 128) pts.push({ x: (x - 200) * 0.07, y: (50 - y) * 0.07 });
+        }
+    }
+    return pts;
+}
+
+function generateShape(type) {
+    const colorObj = new THREE.Color();
+    document.getElementById('shape-label').innerText = type === 'text_love' ? "I love you lovey, Mahal na mahal kita baby HAHAAHAH ang galing ko no" : type;
+    let textPts = type === 'text_love' ? getTextPoints("I love you lovey") : [];
+
+    for(let i=0; i<particleCount; i++) {
+        let x=0, y=0, z=0;
+        if(type === 'heart') {
+            const t = Math.random() * Math.PI * 2;
+            x = 16 * Math.pow(Math.sin(t), 3) * 0.25; y = (13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t)) * 0.25;
+            colorObj.setHex(0xff3366);
+        } else if(type === 'text_love') {
+            const p = textPts[i % textPts.length] || {x:0, y:0};
+            x = p.x; y = p.y; z = (Math.random() - 0.5) * 0.5; colorObj.setHex(0xff69b4);
+        } else if(type === 'star') {
+            const t = Math.random() * Math.PI * 2; const r = (3 + Math.sin(t * 5)) * 1.5;
+            x = Math.cos(t) * r; y = Math.sin(t) * r; colorObj.setHex(0xffff00);
+        } else if(type === 'ring') {
+            const r = 7 + Math.random() * 2; const a = Math.random() * Math.PI * 2;
+            x = Math.cos(a) * r; z = Math.sin(a) * r; y = (Math.random()-0.5) * 0.5; colorObj.setHex(0x00ffff);
+        } else { // Galaxy
+            const r = Math.random() * 12; const a = Math.random() * Math.PI * 2 + r * 0.5;
+            x = Math.cos(a)*r; z = Math.sin(a)*r; y = (Math.random()-0.5)*4; colorObj.setHex(0x4488ff);
+        }
+        originalPos.set([x,y,z], i*3);
+        colors.set([colorObj.r, colorObj.g, colorObj.b], i*3);
+    }
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(originalPos), 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+generateShape('galaxy');
+
+/** 3. GESTURE LOGIC **/
+const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6 });
+
+hands.onResults(results => {
+    if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
+        const lm = results.multiHandLandmarks[0];
+        
+        // POV Control (Index Finger)
+        handWorldPos.set((0.5 - lm[8].x) * 25, (0.5 - lm[8].y) * 20, 0);
+        targetCamPos.lerp(new THREE.Vector3(handWorldPos.x, handWorldPos.y, 15), 0.1);
+
+        // Pinch Zoom
+        const dx = lm[4].x - lm[8].x; const dy = lm[4].y - lm[8].y;
+        zoomFactor = THREE.MathUtils.mapLinear(Math.sqrt(dx*dx + dy*dy), 0.05, 0.3, 3.5, 0.5);
+
+        // Finger Counting for Shapes
+        const extended = [
+            Math.abs(lm[4].x - lm[2].x) > 0.06, // Thumb
+            lm[8].y < lm[6].y,  // Index
+            lm[12].y < lm[10].y, // Middle
+            lm[16].y < lm[14].y, // Ring
+            lm[20].y < lm[18].y  // Pinky
+        ];
+        const count = extended.filter(Boolean).length;
+        if (count > 0 && count <= shapes.length) {
+            const newIdx = count - 1;
+            if (newIdx !== currentShapeIndex) {
+                currentShapeIndex = newIdx;
+                generateShape(shapes[currentShapeIndex]);
+            }
+        }
+        
+        // Open Hand Trigger for Photo Rain
+        isHandOpen = (count >= 4); 
+    } else {
+        isHandOpen = false;
+    }
+});
+
+/** 4. ENGINE **/
+async function ignite() {
+    document.getElementById('bg-music').play();
+    document.getElementById('launcher').style.opacity = '0';
+    setTimeout(() => document.getElementById('launcher').style.display = 'none', 800);
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    document.getElementById('webcam').srcObject = stream;
+    new Camera(document.getElementById('webcam'), { onFrame: async () => await hands.send({image: document.getElementById('webcam')}) }).start();
+    animate();
+}
+
+function spawnPhoto() {
+    if (!isHandOpen || myTextures.length === 0) return;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ 
+        map: myTextures[Math.floor(Math.random()*myTextures.length)], transparent: true, opacity: 0 
+    }));
+    const angle = Math.random()*Math.PI*2; const radius = 10 + Math.random()*5;
+    mesh.position.set(handWorldPos.x + Math.cos(angle)*radius, 15, handWorldPos.z + Math.sin(angle)*radius);
+    mesh.userData = { angle, radius, speedY: 0.12, rot: 0.03 };
+    scene.add(mesh); fallingMeshes.push(mesh);
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    camera.position.lerp(targetCamPos, 0.05);
+    camera.zoom = THREE.MathUtils.lerp(camera.zoom, zoomFactor, 0.1);
+    camera.updateProjectionMatrix();
+    camera.lookAt(0,0,0);
+
+    const posAttr = geometry.attributes.position;
+    for(let i=0; i<particleCount; i++) {
+        const i3 = i*3;
+        posAttr.array[i3] += (originalPos[i3] - posAttr.array[i3]) * 0.1;
+        posAttr.array[i3+1] += (originalPos[i3+1] - posAttr.array[i3+1]) * 0.1;
+        posAttr.array[i3+2] += (originalPos[i3+2] - posAttr.array[i3+2]) * 0.1;
+    }
+    posAttr.needsUpdate = true;
+    points.rotation.y += 0.002;
+
+    if (isHandOpen && Math.random() > 0.9) spawnPhoto();
+    for (let i = fallingMeshes.length - 1; i >= 0; i--) {
+        const m = fallingMeshes[i];
+        m.userData.angle += m.userData.rot; m.userData.radius *= 0.985;
+        m.position.x = handWorldPos.x + Math.cos(m.userData.angle)*m.userData.radius;
+        m.position.y -= m.userData.speedY;
+        m.material.opacity = Math.min(m.material.opacity + 0.05, 1);
+        if (m.position.y < -20) { scene.remove(m); fallingMeshes.splice(i,1); }
+    }
+    renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
